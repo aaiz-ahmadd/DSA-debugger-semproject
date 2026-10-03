@@ -209,15 +209,48 @@ struct PendingPatch
 // PASS 0x0: READING source.bin + VALIDITY CHECK
 bool readSourceLine(ifstream &in, string &out)
 {
-    // reads the next nonblank line
+    while(getline(in, out)) {
+        if(out == "")
+            continue;
+        else    
+            return true;
+    }
+    return false;
 }
 string firstWord(const string &line)
 {
-    // returns first word from the input string
+    int i = 0;
+    while(i < line.size() && line[i] == ' ')
+        i++;
+    
+    string temp;
+
+    while(i < line.size() && line[i] != ' ') {
+        temp += line[i];
+        i++;
+    }
+    return temp;
 }
 string secondWord(const string &line)
 {
-    // returns the second word
+    int i = 0;
+    while(i < line.size() && line[i] == ' ')
+        i++;
+
+    while(i < line.size() && line[i] != ' ')
+        i++;
+
+    while(i < line.size() && line[i] == ' ')
+        i++;
+
+    string temp;
+
+    while(i < line.size() && line[i] != ' ') {
+        temp += line[i];
+        i++;
+    }
+
+    return temp;
 }
 bool validateProgram(const char *sourcePath)
 {
