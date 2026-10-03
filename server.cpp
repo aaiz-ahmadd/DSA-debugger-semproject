@@ -254,7 +254,29 @@ string secondWord(const string &line)
 }
 bool validateProgram(const char *sourcePath)
 {
-    // for each func defined there should be exactly one func_end and no nested funcs allowed - 
+    ifstream in(sourcePath);
+    if(!in) {
+        cout << "File not opened!" << endl;
+        return false;
+    }
+    string str;
+    bool in_func = false;
+    while(readSourceLine(in, str)) {
+        string first = firstWord(str);
+        if(first == "func") {
+            if(in_func)
+                return false;
+            in_func = true;
+        }
+        if(first == "func_end") {
+            if(!in_func)
+                return false;
+            in_func = false;
+        }
+    }
+    if(in_func)
+        return false;
+    return true;
 }
 
 // PASS 0x1: RESOLVE() -> resolve.bin
