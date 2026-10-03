@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <cstdint>
 #include <cstdio>
+#include <stdexcept>
 using namespace std;
 
 // ---- Constants ----
@@ -45,31 +46,65 @@ class Stack
 public:
     // Implement these functions:
     Stack()
-    { // initialize the stack
+    {
+        top = nullptr;
+        count = 0;
     }
     void push(const T &val)
     {
-
-        // pushes the value on the stack if max limit is not reached yet.
+        if(count >= MAX_STACK_DEPTH) {
+            throw overflow_error("Stack is full!");
+        }
+        Node* n = new Node();
+        n->next = top;
+        top = n;
+        n->data = val;
+        count++;
     }
     T pop()
     {
-        // pop the top value on the stack
+        if(count == 0) {
+            throw underflow_error("Stack is empty!");
+        }
+        Node* temp = top;
+        top = top->next;
+        count--;
+        T d = temp->data;
+        delete temp;
+        return d;
     }
     T &peek()
     {
-        // returns the top value on the stack
+        if(count == 0) {
+            throw underflow_error("Stack is empty!");
+        }
+        return top->data;
     }
     bool isEmpty()
     {
+        return count == 0;
     }
     int32_t depth()
     {
+        return count;
     }
     int32_t snapshot_into(T out[], int32_t maxLen)
     {
-        // copies every frame, top to bottom in the array given as a parameter
-        // this is what buildSnapshot() call, returns count written
+        int _count = 0;
+        Node* temp = top;
+        while(temp != nullptr && _count < maxLen) {
+            out[_count++] = temp->data;
+            temp = temp->next;
+        }
+        return _count;
+    }
+    ~Stack() {
+        Node* temp = top;
+        while(temp != nullptr) {
+            top = top->next;
+            delete temp;
+            temp = top;
+        }
     }
 };
 
