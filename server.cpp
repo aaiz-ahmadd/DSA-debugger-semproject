@@ -295,6 +295,24 @@ int64_t writeResolveRecord(FILE *f, int64_t offsetField, const string &text)
 }
 int64_t readResolveRecord(FILE *f, string &outText)
 {
+    int64_t offset;
+    int32_t size;
+
+    if(fread(&offset, sizeof(int64_t), 1, f) != 1)
+        return -1;
+    if(fread(&size, sizeof(int32_t), 1, f) != 1)
+        return -1;
+    
+    if(size <= 0)
+        return -1; // corrupt size
+
+    string temp(size, '\0');
+
+    if(fread(&temp[0], 1, size, f) != size)
+        return -1;
+    outText = temp;
+
+    return offset;
     // reads one record at the current position and advances past it, returns the offset field - the raw line text comes back untouched in outText.
 }
 int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
@@ -303,6 +321,89 @@ int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
     int32_t funcCount = 0;
     PendingPatch patches[MAX_PATCHES];
     int32_t patchCount = 0;
+
+    ifstream in(sourcePath);
+    if(!in) {
+        cout << "Source file not opened!" << endl;
+        return -1;
+    }
+    FILE* dest = fopen(resolveBinPath, "wb");
+    if(dest == nullptr) {
+        cout << "Dest file not opened!" << endl;
+        return -1;
+    }
+    
+    string temp;
+    int64_t mainOffset = -1;
+
+    while(readSourceLine(in, temp)) {
+        int64_t record_position = writeResolveRecord(dest, 0, temp);
+        string first = firstWord(temp);
+        string second = secondWord(temp);
+
+        if(first == "func" && second == "main") {
+            mainOffset = record_position;
+        }
+        if(first == "func") {
+            if(funcCount < MAX_FUNCS){
+                funcArray[funcCount].funcName = second;
+                funcArray[funcCount].byteOffsetInResolveBin = record_position;
+                funcCount++;
+            }
+            else {
+                cout << "Maximum function limit reached!" << endl;
+                in.close();
+                fclose(dest);
+                return -1;
+            }
+        }
+        else if(first == "call") {
+            if(patchCount < MAX_PATCHES) {
+                patches[patchCount].targetFuncName = second;
+                patches[patchCount].byteOffsetOfOffsetField = record_position;
+                patchCount++;
+            }
+            else {
+                cout << "Maximum patch limit reached!" << endl;
+                in.close();
+                fclose(dest);
+                return -1;
+            }
+        }
+    }
+
+    in.close();
+
+    for(int i = 0; i < patchCount; i++) {
+        bool found = false;
+        for(int j = 0; j < funcCount; j++) {
+            if(patches[i].targetFuncName == funcArray[j].funcName) {
+                found = true;
+                if(fseek(dest, patches[i].byteOffsetOfOffsetField, SEEK_SET) != 0) {
+                    cout << "fseek failed!" << endl;
+                    fclose(dest);
+                    return -1;
+                }
+                fwrite(&funcArray[j].byteOffsetInResolveBin, sizeof(funcArray[j].byteOffsetInResolveBin), 1, dest);
+                break;
+            }
+        }
+        if(!found) {
+            cout << "Func not found & you are calling!" << endl;
+            fclose(dest);
+            return -1;
+        }
+    }
+
+    fclose(dest);
+
+    if(mainOffset == -1) {
+        cout << "main function not found!" << endl;
+        return mainOffset;
+    }
+
+    return mainOffset;
+
     // Every source line becomes one record holding the raw line, as-is.
     // resolve() only PEEKS at the leading word(s) -- enough to spot FUNC
     // (remember its position) and CALL (remember which function it needs
