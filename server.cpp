@@ -282,6 +282,14 @@ bool validateProgram(const char *sourcePath)
 // PASS 0x1: RESOLVE() -> resolve.bin
 int64_t writeResolveRecord(FILE *f, int64_t offsetField, const string &text)
 {
+    int64_t current = ftell(f);
+    int32_t text_size = text.size();
+
+    fwrite(&offsetField, sizeof(int64_t), 1, f);
+    fwrite(&text_size, sizeof(int32_t), 1, f);
+    fwrite(text.data(), 1, text_size, f);
+
+    return current;
     // writes one [offset(8B)][size(4B)][string] record at the current file position
     // returns this record's own starting byte position
 }
