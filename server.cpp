@@ -7,7 +7,6 @@
 //   3. Pass 0X2   -- execute resolve.bin: tokenize ONE line at a time, update the call stack, take a snapshot -> Timeline
 //   4. Pass 0X3   -- serialize Timeline -> session.tdbg(header + snapshot records + dense index)
 
-
 #include <iostream>
 #include <string>
 #include <cstdint>
@@ -26,8 +25,8 @@ const int32_t MAX_FUNCS = 128;
 const int32_t MAX_TOKENS = MAX_VARS_PER_FRAME + 2; // kW + func_name + upto 16 params/args
 const int32_t MAX_PATCHES = MAX_FUNCS * 4;
 const uint64_t MAX_SOURCE_BYTES = 15ULL * 1024 * 1024; // sanity cap on the declared file length
-const int32_t IO_BUFFER_SIZE = 64 * 1024;                  // fixed buffer for streaming to/from disk
-const int32_t SOCKET_TIMEOUT_SEC = 5;                      // TODO: apply as SO_RCVTIMEO so a deadclient can't hang the server forever
+const int32_t IO_BUFFER_SIZE = 64 * 1024;              // fixed buffer for streaming to/from disk
+const int32_t SOCKET_TIMEOUT_SEC = 5;                  // TODO: apply as SO_RCVTIMEO so a deadclient can't hang the server forever
 
 // ---- Custom data structures
 
@@ -52,10 +51,11 @@ public:
     }
     void push(const T &val)
     {
-        if(count >= MAX_STACK_DEPTH) {
+        if (count >= MAX_STACK_DEPTH)
+        {
             throw overflow_error("Stack is full!");
         }
-        Node* n = new Node();
+        Node *n = new Node();
         n->next = top;
         top = n;
         n->data = val;
@@ -63,10 +63,11 @@ public:
     }
     T pop()
     {
-        if(count == 0) {
+        if (count == 0)
+        {
             throw underflow_error("Stack is empty!");
         }
-        Node* temp = top;
+        Node *temp = top;
         top = top->next;
         count--;
         T d = temp->data;
@@ -75,7 +76,8 @@ public:
     }
     T &peek()
     {
-        if(count == 0) {
+        if (count == 0)
+        {
             throw underflow_error("Stack is empty!");
         }
         return top->data;
@@ -91,23 +93,25 @@ public:
     int32_t snapshot_into(T out[], int32_t maxLen)
     {
         int _count = 0;
-        Node* temp = top;
-        while(temp != nullptr && _count < maxLen) {
+        Node *temp = top;
+        while (temp != nullptr && _count < maxLen)
+        {
             out[_count++] = temp->data;
             temp = temp->next;
         }
         return _count;
     }
-    ~Stack() {
-        Node* temp = top;
-        while(temp != nullptr) {
+    ~Stack()
+    {
+        Node *temp = top;
+        while (temp != nullptr)
+        {
             top = top->next;
             delete temp;
             temp = top;
         }
     }
 };
-
 
 // Timeline : doubly linked list of Snapshots
 struct Snapshot; // fwd declaration;
@@ -131,15 +135,17 @@ public:
     }
     void record(Snapshot *s)
     {
-        TimelineNode* temp = new TimelineNode();
+        TimelineNode *temp = new TimelineNode();
         temp->data = s;
-        if(head == nullptr) {
+        if (head == nullptr)
+        {
             head = tail = temp;
             head->next = nullptr;
             tail->prev = nullptr;
             stepCount++;
         }
-        else {
+        else
+        {
             tail->next = temp;
             temp->prev = tail;
             tail = temp;
@@ -204,15 +210,14 @@ struct PendingPatch
     string targetFuncName;
 };
 
-
-
 // PASS 0x0: READING source.bin + VALIDITY CHECK
 bool readSourceLine(ifstream &in, string &out)
 {
-    while(getline(in, out)) {
-        if(out == "")
+    while (getline(in, out))
+    {
+        if (out == "")
             continue;
-        else    
+        else
             return true;
     }
     return false;
@@ -220,12 +225,13 @@ bool readSourceLine(ifstream &in, string &out)
 string firstWord(const string &line)
 {
     int i = 0;
-    while(i < line.size() && line[i] == ' ')
+    while (i < line.size() && line[i] == ' ')
         i++;
-    
+
     string temp;
 
-    while(i < line.size() && line[i] != ' ') {
+    while (i < line.size() && line[i] != ' ')
+    {
         temp += line[i];
         i++;
     }
@@ -234,18 +240,19 @@ string firstWord(const string &line)
 string secondWord(const string &line)
 {
     int i = 0;
-    while(i < line.size() && line[i] == ' ')
+    while (i < line.size() && line[i] == ' ')
         i++;
 
-    while(i < line.size() && line[i] != ' ')
+    while (i < line.size() && line[i] != ' ')
         i++;
 
-    while(i < line.size() && line[i] == ' ')
+    while (i < line.size() && line[i] == ' ')
         i++;
 
     string temp;
 
-    while(i < line.size() && line[i] != ' ') {
+    while (i < line.size() && line[i] != ' ')
+    {
         temp += line[i];
         i++;
     }
@@ -255,26 +262,30 @@ string secondWord(const string &line)
 bool validateProgram(const char *sourcePath)
 {
     ifstream in(sourcePath);
-    if(!in) {
+    if (!in)
+    {
         cout << "File not opened!" << endl;
         return false;
     }
     string str;
     bool in_func = false;
-    while(readSourceLine(in, str)) {
+    while (readSourceLine(in, str))
+    {
         string first = firstWord(str);
-        if(first == "func") {
-            if(in_func)
+        if (first == "func")
+        {
+            if (in_func)
                 return false;
             in_func = true;
         }
-        if(first == "func_end") {
-            if(!in_func)
+        if (first == "func_end")
+        {
+            if (!in_func)
                 return false;
             in_func = false;
         }
     }
-    if(in_func)
+    if (in_func)
         return false;
     return true;
 }
@@ -298,17 +309,17 @@ int64_t readResolveRecord(FILE *f, string &outText)
     int64_t offset;
     int32_t size;
 
-    if(fread(&offset, sizeof(int64_t), 1, f) != 1)
+    if (fread(&offset, sizeof(int64_t), 1, f) != 1)
         return -1;
-    if(fread(&size, sizeof(int32_t), 1, f) != 1)
+    if (fread(&size, sizeof(int32_t), 1, f) != 1)
         return -1;
-    
-    if(size <= 0)
+
+    if (size <= 0)
         return -1; // corrupt size
 
     string temp(size, '\0');
 
-    if(fread(&temp[0], 1, size, f) != size)
+    if (fread(&temp[0], 1, size, f) != size)
         return -1;
     outText = temp;
 
@@ -323,47 +334,57 @@ int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
     int32_t patchCount = 0;
 
     ifstream in(sourcePath);
-    if(!in) {
+    if (!in)
+    {
         cout << "Source file not opened!" << endl;
         return -1;
     }
-    FILE* dest = fopen(resolveBinPath, "wb");
-    if(dest == nullptr) {
+    FILE *dest = fopen(resolveBinPath, "wb");
+    if (dest == nullptr)
+    {
         cout << "Dest file not opened!" << endl;
         return -1;
     }
-    
+
     string temp;
     int64_t mainOffset = -1;
 
-    while(readSourceLine(in, temp)) {
+    while (readSourceLine(in, temp))
+    {
         int64_t record_position = writeResolveRecord(dest, 0, temp);
         string first = firstWord(temp);
         string second = secondWord(temp);
 
-        if(first == "func" && second == "main") {
+        if (first == "func" && second == "main")
+        {
             mainOffset = record_position;
         }
-        if(first == "func") {
-            if(funcCount < MAX_FUNCS){
+        if (first == "func")
+        {
+            if (funcCount < MAX_FUNCS)
+            {
                 funcArray[funcCount].funcName = second;
                 funcArray[funcCount].byteOffsetInResolveBin = record_position;
                 funcCount++;
             }
-            else {
+            else
+            {
                 cout << "Maximum function limit reached!" << endl;
                 in.close();
                 fclose(dest);
                 return -1;
             }
         }
-        else if(first == "call") {
-            if(patchCount < MAX_PATCHES) {
+        else if (first == "call")
+        {
+            if (patchCount < MAX_PATCHES)
+            {
                 patches[patchCount].targetFuncName = second;
                 patches[patchCount].byteOffsetOfOffsetField = record_position;
                 patchCount++;
             }
-            else {
+            else
+            {
                 cout << "Maximum patch limit reached!" << endl;
                 in.close();
                 fclose(dest);
@@ -374,12 +395,16 @@ int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
 
     in.close();
 
-    for(int i = 0; i < patchCount; i++) {
+    for (int i = 0; i < patchCount; i++)
+    {
         bool found = false;
-        for(int j = 0; j < funcCount; j++) {
-            if(patches[i].targetFuncName == funcArray[j].funcName) {
+        for (int j = 0; j < funcCount; j++)
+        {
+            if (patches[i].targetFuncName == funcArray[j].funcName)
+            {
                 found = true;
-                if(fseek(dest, patches[i].byteOffsetOfOffsetField, SEEK_SET) != 0) {
+                if (fseek(dest, patches[i].byteOffsetOfOffsetField, SEEK_SET) != 0)
+                {
                     cout << "fseek failed!" << endl;
                     fclose(dest);
                     return -1;
@@ -388,7 +413,8 @@ int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
                 break;
             }
         }
-        if(!found) {
+        if (!found)
+        {
             cout << "Func not found & you are calling!" << endl;
             fclose(dest);
             return -1;
@@ -397,7 +423,8 @@ int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
 
     fclose(dest);
 
-    if(mainOffset == -1) {
+    if (mainOffset == -1)
+    {
         cout << "main function not found!" << endl;
         return mainOffset;
     }
@@ -411,7 +438,7 @@ int64_t resolveProgram(const char *sourcePath, const char *resolveBinPath)
     // Once the whole file is written, every CALL's offset field is patched
     // with its target's position. Patching happens after the full write
     // Returns the byte offset of main's FUNC header record.
-    // if there is no main return the error 
+    // if there is no main return the error
 }
 
 // PASS 0x2: EXECUTION (tokenization happens here)
@@ -428,57 +455,64 @@ struct Token
 };
 int32_t tokenizeLine(const string &line, Token tokens[], int32_t maxTokens)
 {
-        int32_t count = 0;
-        string first = firstWord(line);
-        if(count >= maxTokens) {
+    int32_t count = 0;
+    string first = firstWord(line);
+    if (count >= maxTokens)
+    {
+        return -1;
+    }
+    if (!first.empty())
+    {
+        tokens[count].type = KEYWORD;
+        tokens[count++].text = first;
+    }
+    else
+        return -1;
+    string second = secondWord(line);
+    if (!second.empty())
+    {
+        if (count >= maxTokens)
             return -1;
+        tokens[count].type = IDENTIFIER;
+        tokens[count++].text = second;
+    }
+
+    int i = 0;
+    while (i < line.size() && line[i] == ' ')
+        i++;
+
+    while (i < line.size() && line[i] != ' ')
+        i++;
+
+    while (i < line.size() && line[i] == ' ')
+        i++;
+
+    while (i < line.size() && line[i] != ' ')
+        i++;
+
+    while (i < line.size() && line[i] == ' ')
+        i++;
+
+    while (i < line.size())
+    {
+        string temp = "";
+        while (i < line.size() && line[i] != ' ')
+        {
+            temp += line[i];
+            i++;
         }
-        if(!first.empty()){
-            tokens[count].type = KEYWORD;
-            tokens[count++].text = first;
+        if (count < maxTokens)
+        {
+            tokens[count].type = PARAM;
+            tokens[count++].text = temp;
         }
         else
             return -1;
-        string second = secondWord(line);
-        if(!second.empty()) {
-            if(count >= maxTokens)
-                return -1;
-            tokens[count].type = IDENTIFIER;
-            tokens[count++].text = second;
+        while (i < line.size() && line[i] == ' ')
+        {
+            i++;
         }
-
-        int i = 0;
-        while(i < line.size() && line[i] == ' ')
-            i++;
-
-        while(i < line.size() && line[i] != ' ')
-            i++;
-
-        while(i < line.size() && line[i] == ' ')
-            i++;
-        
-        while(i < line.size() && line[i] != ' ')
-            i++;
-
-        while(i < line.size() && line[i] == ' ')
-            i++;
-        
-        while(i < line.size()) {
-            string temp = "";
-            while(i < line.size() && line[i] != ' ') {
-                temp += line[i];
-                i++;
-            }
-            if(count < maxTokens) {      
-                tokens[count].type = PARAM;
-                tokens[count++].text = temp;
-            }
-            else
-                return -1;
-            while(i < line.size() && line[i] == ' ') {
-                i++;
-            } 
-        }
+    }
 
     return count;
     // first word is always a instruction keyword
@@ -488,7 +522,7 @@ int32_t tokenizeLine(const string &line, Token tokens[], int32_t maxTokens)
 }
 Snapshot *buildSnapshot(Stack<Frame> &callStack)
 {
-    Snapshot* s = new Snapshot();
+    Snapshot *s = new Snapshot();
     s->stackDepth = callStack.snapshot_into(s->callStack, MAX_STACK_DEPTH);
 
     return s;
@@ -496,6 +530,502 @@ Snapshot *buildSnapshot(Stack<Frame> &callStack)
 }
 void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &timeline)
 {
+    FILE *f = fopen(resolveBinPath, "rb");
+    if (f == nullptr)
+    {
+        cout << "File not opened!" << endl;
+        return;
+    }
+    fseek(f, mainOffset, SEEK_SET);
+    Frame main_frame;
+    main_frame.func_name = "main";
+    main_frame.argc = 0;
+    main_frame.returnLine = -1; // bcz main has no caller to return to
+    main_frame.localCount = 0;
+
+    Stack<Frame> frameStack;
+    frameStack.push(main_frame);
+
+    while (1)
+    {
+        string data = "";
+        int64_t offset = readResolveRecord(f, data);
+
+        if (offset == -1)
+        {
+            break;
+        }
+
+        Token tokens[MAX_TOKENS];
+
+        Frame &current = frameStack.peek(); // & to update properly
+
+        int32_t token_count = tokenizeLine(data, tokens, MAX_TOKENS);
+        if (tokens[0].text == "func") {
+            if(token_count < 2) {
+                cout << "Invalid function heaer!" << endl;
+                fclose(f);
+                return;
+            }
+
+            if(current.func_name != tokens[1].text) {
+                cout << "Func not matched!" << endl;
+                fclose(f);
+                return;
+            }
+        }
+        else if (tokens[0].text == "func_end")
+        {
+            if (frameStack.depth() == 1)
+            {
+                Snapshot* s = buildSnapshot(frameStack);
+                timeline.record(s);
+
+                frameStack.pop();
+                break;
+            }
+            Frame finished_func = frameStack.pop();
+
+            Frame &caller = frameStack.peek();
+
+            if (fseek(f, 0, SEEK_SET) != 0)
+            {
+                cout << "Fseek is failed!" << endl;
+                fclose(f);
+                return;
+            }
+
+            bool call_found = false;
+            string call_line;
+
+            while (1)
+            {
+                int64_t call_offset = readResolveRecord(f, call_line);
+
+                if (call_offset == -1)
+                {
+                    break;
+                }
+
+                int64_t current_pos = ftell(f);
+
+                if (current_pos == finished_func.returnLine)
+                {
+                    Token call_tokens[MAX_TOKENS];
+
+                    int32_t call_token_count = tokenizeLine(call_line, call_tokens, MAX_TOKENS);
+
+                    if (call_token_count < 2)
+                    {
+                        cout << "Invalid call!" << endl;
+                        fclose(f);
+                        return;
+                    }
+
+                    for (int i = 0; i < finished_func.argc; i++)
+                    {
+                        bool found = false;
+
+                        for (int j = 0; j < caller.localCount; j++)
+                        {
+                            if (caller.locals[j].name == call_tokens[i + 2].text)
+                            {
+                                caller.locals[j].value = finished_func.argv[i].value;
+                                found = true;
+                                break;
+                            }
+                        }
+
+                        if (!found)
+                        {
+                            for (int j = 0; j < caller.argc; j++)
+                            {
+                                if (caller.argv[j].name == call_tokens[i + 2].text)
+                                {
+                                    caller.argv[j].value = finished_func.argv[i].value;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!found)
+                        {
+                            cout << "Arguments not found!" << endl;
+                            fclose(f);
+                            return;
+                        }
+                    }
+                    call_found = true;
+                    break;
+                }
+            }
+
+            if (!call_found)
+            {
+                cout << "Call not found!" << endl;
+                fclose(f);
+                return;
+            }
+
+            if (fseek(f, finished_func.returnLine, SEEK_SET) != 0)
+            {
+                cout << "Fseek is failed!" << endl;
+                fclose(f);
+                return;
+            }
+        }
+        else if (tokens[0].text == "call")
+        {
+            int64_t return_pos = ftell(f);
+            Frame called_func;
+            called_func.func_name = tokens[1].text;
+            called_func.localCount = 0;
+            called_func.returnLine = return_pos;
+            called_func.argc = 0;
+
+            if (fseek(f, offset, SEEK_SET) != 0)
+            {
+                cout << "Fseek is failed!" << endl;
+                fclose(f);
+                return;
+            }
+
+            string out;
+            int64_t header_offset = readResolveRecord(f, out);
+
+            Token header_tokens[MAX_TOKENS];
+
+            int32_t header_token_count = tokenizeLine(out, header_tokens, MAX_TOKENS);
+
+            if (header_token_count < 2)
+            {
+                cout << "Invalid func header!" << endl;
+                fclose(f);
+                return;
+            }
+
+            if (header_token_count - 2 != token_count - 2)
+            {
+                cout << "Arguments not matched!" << endl;
+                fclose(f);
+                return;
+            }
+
+            if (header_tokens[1].text == tokens[1].text)
+            {
+                called_func.argc = token_count - 2;
+                for (int i = 0; i < called_func.argc; i++)
+                {
+                    called_func.argv[i].name = header_tokens[i + 2].text;
+
+                    bool found = false;
+                    for (int j = 0; j < current.localCount; j++)
+                    {
+                        if (current.locals[j].name == tokens[i + 2].text)
+                        {
+                            found = true;
+                            called_func.argv[i].value = current.locals[j].value;
+                            break;
+                        }
+                    }
+                    if (!found)
+                    {
+                        for (int j = 0; j < current.argc; j++)
+                        {
+                            if (current.argv[j].name == tokens[i + 2].text)
+                            {
+                                found = true;
+                                called_func.argv[i].value = current.argv[j].value;
+                                break;
+                            }
+                        }
+                    }
+                    if (!found)
+                    {
+                        cout << "Arguments not found!" << endl;
+                        fclose(f);
+                        return;
+                    }
+                }
+                frameStack.push(called_func);
+            }
+            else
+            {
+                cout << "Func header not matched!" << endl;
+                fclose(f);
+                return;
+            }
+        }
+        else if (tokens[0].text == "set")
+        {
+            bool found = false;
+            for (int i = 0; i < current.localCount; i++)
+            {
+                if (current.locals[i].name == tokens[1].text)
+                {
+                    found = true;
+                    current.locals[i].value = stoi(tokens[2].text);
+                    break;
+                }
+            }
+            if (!found)
+            {
+                if (current.localCount < MAX_VARS_PER_FRAME)
+                {
+                    current.locals[current.localCount].name = tokens[1].text;
+                    current.locals[current.localCount].value = stoi(tokens[2].text);
+                    current.localCount++;
+                }
+                else
+                {
+                    cout << "Vars per frames reached!" << endl;
+                    fclose(f);
+                    return;
+                }
+            }
+        }
+        else if (tokens[0].text == "add")
+        {
+            Variable *var1 = nullptr;
+
+            for (int i = 0; i < current.localCount; i++)
+            {
+                if (current.locals[i].name == tokens[1].text)
+                {
+                    var1 = &current.locals[i];
+                }
+            }
+            if (var1 == nullptr)
+            {
+                for (int i = 0; i < current.argc; i++)
+                {
+                    if (current.argv[i].name == tokens[1].text)
+                    {
+                        var1 = &current.argv[i];
+                    }
+                }
+            }
+
+            if (var1 == nullptr)
+            {
+                cout << "Var 1 not exists!" << endl;
+                fclose(f);
+                return;
+            }
+
+            Variable *var2 = nullptr;
+
+            for (int i = 0; i < current.localCount; i++)
+            {
+                if (current.locals[i].name == tokens[2].text)
+                {
+                    var2 = &current.locals[i];
+                }
+            }
+            if (var2 == nullptr)
+            {
+                for (int i = 0; i < current.argc; i++)
+                {
+                    if (current.argv[i].name == tokens[2].text)
+                    {
+                        var2 = &current.argv[i];
+                    }
+                }
+            }
+
+            if (var2 == nullptr)
+            {
+                cout << "Var 2 not exists!" << endl;
+                fclose(f);
+                return;
+            }
+
+            var1->value += var2->value;
+        }
+        else if (tokens[0].text == "sub")
+        {
+            Variable *var1 = nullptr;
+
+            for (int i = 0; i < current.localCount; i++)
+            {
+                if (current.locals[i].name == tokens[1].text)
+                {
+                    var1 = &current.locals[i];
+                }
+            }
+            if (var1 == nullptr)
+            {
+                for (int i = 0; i < current.argc; i++)
+                {
+                    if (current.argv[i].name == tokens[1].text)
+                    {
+                        var1 = &current.argv[i];
+                    }
+                }
+            }
+
+            if (var1 == nullptr)
+            {
+                cout << "Var 1 not exists!" << endl;
+                fclose(f);
+                return;
+            }
+
+            Variable *var2 = nullptr;
+
+            for (int i = 0; i < current.localCount; i++)
+            {
+                if (current.locals[i].name == tokens[2].text)
+                {
+                    var2 = &current.locals[i];
+                }
+            }
+            if (var2 == nullptr)
+            {
+                for (int i = 0; i < current.argc; i++)
+                {
+                    if (current.argv[i].name == tokens[2].text)
+                    {
+                        var2 = &current.argv[i];
+                    }
+                }
+            }
+
+            if (var2 == nullptr)
+            {
+                cout << "Var 2 not exists!" << endl;
+                fclose(f);
+                return;
+            }
+
+            var1->value -= var2->value;
+        }
+        else if (tokens[0].text == "mul")
+        {
+            Variable *var1 = nullptr;
+
+            for (int i = 0; i < current.localCount; i++)
+            {
+                if (current.locals[i].name == tokens[1].text)
+                {
+                    var1 = &current.locals[i];
+                }
+            }
+            if (var1 == nullptr)
+            {
+                for (int i = 0; i < current.argc; i++)
+                {
+                    if (current.argv[i].name == tokens[1].text)
+                    {
+                        var1 = &current.argv[i];
+                    }
+                }
+            }
+
+            if (var1 == nullptr)
+            {
+                cout << "Var 1 not exists!" << endl;
+                fclose(f);
+                return;
+            }
+
+            Variable *var2 = nullptr;
+
+            for (int i = 0; i < current.localCount; i++)
+            {
+                if (current.locals[i].name == tokens[2].text)
+                {
+                    var2 = &current.locals[i];
+                }
+            }
+            if (var2 == nullptr)
+            {
+                for (int i = 0; i < current.argc; i++)
+                {
+                    if (current.argv[i].name == tokens[2].text)
+                    {
+                        var2 = &current.argv[i];
+                    }
+                }
+            }
+
+            if (var2 == nullptr)
+            {
+                cout << "Var 2 not exists!" << endl;
+                fclose(f);
+                return;
+            }
+
+            var1->value *= var2->value;
+        }
+        else if (tokens[0].text == "div")
+        {
+            Variable *var1 = nullptr;
+
+            for (int i = 0; i < current.localCount; i++)
+            {
+                if (current.locals[i].name == tokens[1].text)
+                {
+                    var1 = &current.locals[i];
+                }
+            }
+            if (var1 == nullptr)
+            {
+                for (int i = 0; i < current.argc; i++)
+                {
+                    if (current.argv[i].name == tokens[1].text)
+                    {
+                        var1 = &current.argv[i];
+                    }
+                }
+            }
+
+            if (var1 == nullptr)
+            {
+                cout << "Var 1 not exists!" << endl;
+                fclose(f);
+                return;
+            }
+
+            Variable *var2 = nullptr;
+
+            for (int i = 0; i < current.localCount; i++)
+            {
+                if (current.locals[i].name == tokens[2].text)
+                {
+                    var2 = &current.locals[i];
+                }
+            }
+            if (var2 == nullptr)
+            {
+                for (int i = 0; i < current.argc; i++)
+                {
+                    if (current.argv[i].name == tokens[2].text)
+                    {
+                        var2 = &current.argv[i];
+                    }
+                }
+            }
+
+            if (var2 == nullptr)
+            {
+                cout << "Var 2 not exists!" << endl;
+                fclose(f);
+                return;
+            }
+            if (var2->value == 0)
+            {
+                cout << "Err: Dividing by 0" << endl;
+                fclose(f);
+                return;
+            }
+            var1->value /= var2->value;
+        }
+        Snapshot* s = buildSnapshot(frameStack);
+        timeline.record(s);
+    }
+    fclose(f);
     // initialize the call stack
     // make the main frame
     // push main frame on the call stack

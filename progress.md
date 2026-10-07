@@ -5,4 +5,4 @@ I implemented Stack, timeline class, written the helper functions readSourceLine
 I implemented PASS 0x1 for now.
 
 [7/10/2026]:
-Going to start the day with PASS 0x2. Implemented tokenizeLine(). Now moving to buildSnapshot. Implemented buildSnapshot.
+Going to start the day with PASS 0x2. Implemented tokenizeLine(). Now moving to buildSnapshot. Implemented buildSnapshot. Finally implemented executeProgram and completed PASS 0x2.
