@@ -8,4 +8,4 @@ I implemented PASS 0x1 for now.
 Going to start the day with PASS 0x2. Implemented tokenizeLine(). Now moving to buildSnapshot. Implemented buildSnapshot. Finally implemented executeProgram and completed PASS 0x2.
 
 [9/10/2026]:
-Started with PASS 0x3 and completed my project.
+Started with PASS 0x3 and completed my project. Now going to add .gitignore to move other files created after running the code in it.
