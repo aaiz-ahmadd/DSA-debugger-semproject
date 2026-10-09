@@ -194,7 +194,8 @@ void writeHeader(FILE *f, const TTDBHeader &h)
 {
     fwrite(h.magic, 1, 4, f);
     fwrite(&h.version, sizeof(int32_t), 1, f);
-
+    fwrite(&h.stepCount, sizeof(int32_t), 1, f);
+    fwrite(&h.indexOffset, sizeof(int64_t), 1, f);
     // placeholder for other two data members
 }
 
@@ -748,6 +749,11 @@ void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &ti
                         return;
                     }
                 }
+                if(frameStack.depth() >= MAX_STACK_DEPTH) {
+                    cout << "Max stack depth limit reached!" <<endl;
+                    fclose(f);
+                    return;
+                }
                 frameStack.push(called_func);
             }
             else
@@ -1035,8 +1041,94 @@ void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &ti
 }
 
 // PASS 0x3: SERIALIZE TIMELINE
+
+void writeString(FILE* f, const string& str) {
+    int32_t size = str.size();
+    fwrite(&size, sizeof(int32_t), 1, f);
+
+    if(size > 0) {
+        fwrite(str.data(), sizeof(char), size, f);
+    }
+}
+
 void writeTdbg(Timeline &timeline, const char *tdbgPath)
 {
+    FILE* f = fopen(tdbgPath, "wb");
+    
+    if(!f) {
+        cout << "File not opened!" << endl;
+        return;
+    }
+
+    int32_t step_count = timeline.getStepCount();
+
+    TTDBHeader header;
+
+    header.magic[0] = 'T';
+    header.magic[1] = 'T';
+    header.magic[2] = 'D';
+    header.magic[3] = 'B';
+
+    header.version = 1;
+    header.stepCount = step_count;
+    header.indexOffset = 0;
+    
+    fwrite(header.magic, sizeof(char), 4, f);
+    fwrite(&header.version, sizeof(int32_t), 1, f);
+    fwrite(&header.stepCount, sizeof(int32_t), 1, f);
+    fwrite(&header.indexOffset, sizeof(int64_t), 1, f);
+
+    int64_t* idx = new int64_t[step_count];
+    TimelineNode* temp = timeline.begin();
+
+    for(int i = 0; i < step_count; i++) {
+        idx[i] = ftell(f);
+        Snapshot* snap = temp->data;
+
+        fwrite(&snap->stackDepth, sizeof(int32_t), 1, f);
+
+        for(int j = 0; j < snap->stackDepth; j++) {
+            Frame& frame = snap->callStack[j];
+
+            writeString(f, frame.func_name);
+
+            fwrite(&frame.argc, sizeof(int32_t), 1, f);
+
+            for(int k = 0; k < frame.argc; k++) {
+                writeString(f, frame.argv[k].name);
+
+                fwrite(&frame.argv[k].value, sizeof(int32_t), 1, f);
+            }
+            fwrite(&frame.returnLine, sizeof(int32_t), 1, f);
+            fwrite(&frame.localCount, sizeof(int32_t), 1, f);
+
+            for(int k = 0; k < frame.localCount; k++) {
+                writeString(f, frame.locals[k].name);
+                fwrite(&frame.locals[k].value, sizeof(int32_t), 1, f);
+            }
+        }
+        temp = temp->next;
+    }
+
+    header.indexOffset = ftell(f);
+
+    fwrite(idx, sizeof(int64_t), step_count, f);
+
+    if(fseek(f, 0, SEEK_SET) != 0) {
+        cout << "Fseek is failed!" << endl;
+        delete [] idx;
+        fclose(f);
+        return;
+    }
+
+    fwrite(header.magic, sizeof(char), 4, f);
+    fwrite(&header.version, sizeof(int32_t), 1, f);
+    fwrite(&header.stepCount, sizeof(int32_t), 1, f);
+    fwrite(&header.indexOffset, sizeof(int64_t), 1, f);
+
+    delete [] idx;
+
+    fclose(f);
     // placeholder for header
     // index array of the size of stepcount from the timeline
     // placing each snapshot in the file while maintaining the index(starting point of each nth snapshot)
@@ -1054,6 +1146,10 @@ int32_t main()
     }
 
     int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
+
+    if(mainOffset == -1) {
+        return 1;
+    }
 
     Timeline timeline;
     executeProgram("resolve.bin", mainOffset, timeline);
