@@ -9,3 +9,6 @@ Going to start the day with PASS 0x2. Implemented tokenizeLine(). Now moving to 
 
 [9/10/2026]:
 Started with PASS 0x3 and completed my project. Now going to add .gitignore to move other files created after running the code in it.
+
+[17/10/2026]:
+Added phase 2 files and added an initial commit for now.
