@@ -12,3 +12,6 @@ Started with PASS 0x3 and completed my project. Now going to add .gitignore to m
 
 [17/10/2026]:
 Added phase 2 files and added an initial commit for now.
+
+[18/10/2026]:
+Implemented all the functions, structs and constants in helper.h. helper.h is completed.
