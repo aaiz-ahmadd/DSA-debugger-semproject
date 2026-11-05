@@ -1102,9 +1102,6 @@ void writeTdbg(Timeline &timeline, const char *tdbgPath)
     // update the header
 }
 
-// =============================================================================================
-// PHASE 2: THE NETWORK PART (this replaces the old main at the bottom of the file)
-// =============================================================================================
 const int32_t LISTEN_BACKLOG = 16;
 const char *SOURCE_PATH = "source.bin";
 const char *RESOLVE_PATH = "resolve.bin";
