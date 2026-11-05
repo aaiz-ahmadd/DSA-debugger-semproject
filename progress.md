@@ -17,4 +17,4 @@ Added phase 2 files and added an initial commit for now.
 Implemented all the functions, structs and constants in helper.h. helper.h is completed.
 
 [3/11/2026]:
-Started server.cpp file.
+Started server.cpp file. Updated phase 1's server.cpp and implemented the necessary functions for phase 2.

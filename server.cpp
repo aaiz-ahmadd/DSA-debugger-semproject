@@ -16,17 +16,21 @@
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
+#include <sstream>
+#include <cstdlib>
+#include <cstring>
+#include <cerrno>
+#include <csignal>
+#include <poll.h>
+#include <netinet/in.h>
+#include "helper.h"
 using namespace std;
 
 // ---- Constants ----
-const int32_t MAX_VARS_PER_FRAME = 16;
-const int32_t MAX_STACK_DEPTH = 64;
 const int32_t MAX_FUNCS = 128;
 const int32_t MAX_TOKENS = MAX_VARS_PER_FRAME + 2; // kW + func_name + upto 16 params/args
 const int32_t MAX_PATCHES = MAX_FUNCS * 4;
 const uint64_t MAX_SOURCE_BYTES = 15ULL * 1024 * 1024; // sanity cap on the declared file length
-const int32_t IO_BUFFER_SIZE = 64 * 1024;              // fixed buffer for streaming to/from disk
-const int32_t SOCKET_TIMEOUT_SEC = 5;                  // TODO: apply as SO_RCVTIMEO so a deadclient can't hang the server forever
 
 // ---- Custom data structures
 
@@ -164,32 +168,6 @@ public:
 };
 
 // Core structs
-struct Variable
-{
-    string name;
-    int32_t value;
-};
-struct Frame
-{
-    string func_name;
-    int32_t argc;
-    Variable argv[MAX_VARS_PER_FRAME];
-    int32_t returnLine;
-    Variable locals[MAX_VARS_PER_FRAME];
-    int32_t localCount;
-};
-struct Snapshot
-{
-    Frame callStack[MAX_STACK_DEPTH];
-    int32_t stackDepth;
-};
-struct TTDBHeader
-{
-    char magic[4]; // "TTDB"
-    int32_t version;
-    int32_t stepCount;
-    int64_t indexOffset;
-};
 void writeHeader(FILE *f, const TTDBHeader &h)
 {
     fwrite(h.magic, 1, 4, f);
@@ -198,18 +176,6 @@ void writeHeader(FILE *f, const TTDBHeader &h)
     fwrite(&h.indexOffset, sizeof(int64_t), 1, f);
     // placeholder for other two data members
 }
-
-// resolve.bin - bookkeeping
-struct FuncEntry
-{
-    string funcName;
-    int64_t byteOffsetInResolveBin; // where this function's FUNC header record sits
-};
-struct PendingPatch
-{
-    int64_t byteOffsetOfOffsetField; // where in resolve.bin to seek back and overwrite
-    string targetFuncName;
-};
 
 // PASS 0x0: READING source.bin + VALIDITY CHECK
 bool readSourceLine(ifstream &in, string &out)
@@ -1135,26 +1101,292 @@ void writeTdbg(Timeline &timeline, const char *tdbgPath)
     // after timeline add the index array i the file
     // update the header
 }
-// main section
-int32_t main()
+
+// =============================================================================================
+// PHASE 2: THE NETWORK PART (this replaces the old main at the bottom of the file)
+// =============================================================================================
+const int32_t LISTEN_BACKLOG = 16;
+const char *SOURCE_PATH = "source.bin";
+const char *RESOLVE_PATH = "resolve.bin";
+const char *TDBG_PATH = "session.tdbg";
+sig_atomic_t flag = 1; // set to 0 by ctrl+c, the server loop ends and closes things safely
+
+// Runs pass 0x0 - 0x3 on source.bin. On a failure it returns false and err holds the text for the client.
+bool buildDebugFile(string &err)
 {
+    // The Phase 1 passes report their errors with cout. While they run, cout is pointed at a string, so whatever
+    // they print is the error text for the client (when everything is fine they print nothing).
+    ostringstream captured;
+    streambuf *old_buffer = cout.rdbuf(captured.rdbuf());
 
-    if (!validateProgram("source.bin"))
+    bool ok = true;
+    bool invalid_structure = false;
+    try
     {
-        // send an error response instead of a .tdbg file
-        return 1;
+        if (!validateProgram(SOURCE_PATH))
+        {
+            ok = false;
+            invalid_structure = true;
+        }
+
+        int64_t mainOffset = -1;
+        if (ok)
+        {
+            mainOffset = resolveProgram(SOURCE_PATH, RESOLVE_PATH);
+            if (mainOffset == -1)
+                ok = false;
+        }
+
+        Timeline timeline;
+        if (ok)
+        {
+            executeProgram(RESOLVE_PATH, mainOffset, timeline);
+            if (captured.str().size() > 0)
+                ok = false;
+        }
+        if (ok)
+        {
+            writeTdbg(timeline, TDBG_PATH);
+            if (captured.str().size() > 0)
+                ok = false;
+        }
+    }
+    catch (...)
+    {
+        ok = false;
+        captured << "Internal server error!";
+    }
+    cout.rdbuf(old_buffer); // cout prints on the screen again
+
+    if (ok)
+        return true;
+
+    err = captured.str();
+    while (err.size() > 0 && (err[err.size() - 1] == '\n' || err[err.size() - 1] == '\r'))
+        err.erase(err.size() - 1);
+    if (err.size() == 0)
+    {
+        if (invalid_structure)
+            err = "Invalid program: func and func_end do not match!";
+        else
+            err = "Invalid program!";
+    }
+    return false;
+}
+
+// STAGE 0: RECEIVE
+// Reads [status][source][checksum] until the client closes its write side (recv returns 0) and writes
+// the source straight to source.bin. It always reads to the end, even when the upload is already known
+// to be bad, so closing the socket later can not reset the connection while the reply is on its way.
+bool receiveUpload(int sock, const char *path, string &err)
+{
+    FILE *dest = fopen(path, "wb");
+    if (dest == nullptr)
+    {
+        err = "Server could not create source.bin!";
+        return false;
     }
 
-    int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
+    TrailerChecker checker;
+    char in[IO_BUFFER_SIZE];
+    char out[IO_BUFFER_SIZE];
+    bool got_status = false;
+    bool too_big = false;
+    bool write_failed = false;
+    bool net_failed = false;
+    bool timed_out = false;
+    char status = STATUS_OK;
+    uint64_t source_bytes = 0;
 
-    if(mainOffset == -1) {
-        return 1;
+    while (1)
+    {
+        ssize_t n = recv(sock, in, IO_BUFFER_SIZE, 0);
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            net_failed = true;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                timed_out = true;
+            break;
+        }
+        if (n == 0)
+            break; // the client finished sending
+
+        int32_t released = checker.feed(in, n, out);
+        int32_t skip = 0;
+        if (released > 0 && got_status == false)
+        {
+            status = out[0]; // the first byte of the message is the status
+            got_status = true;
+            skip = 1;
+        }
+        int32_t len = released - skip;
+        if (len == 0)
+            continue;
+
+        source_bytes += len;
+        if (source_bytes > MAX_SOURCE_BYTES)
+            too_big = true; // keep reading, but stop writing
+        if (too_big == false)
+        {
+            if (fwrite(out + skip, 1, (size_t)len, dest) != (size_t)len)
+                write_failed = true;
+        }
+    }
+    if (fclose(dest) != 0)
+        write_failed = true;
+
+    if (net_failed)
+    {
+        if (timed_out)
+            err = "Upload timed out!";
+        else
+            err = "Connection error while receiving the upload!";
+        return false;
+    }
+    if (too_big)
+    {
+        err = "Source file too large (limit is " + to_string(MAX_SOURCE_BYTES) + " bytes)!";
+        return false;
+    }
+    if (!checker.verify())
+    {
+        err = MSG_UPLOAD_CORRUPT;
+        return false;
+    }
+    if (status != STATUS_OK)
+    {
+        err = "Unexpected status byte in the upload!";
+        return false;
+    }
+    if (write_failed)
+    {
+        err = "Server could not write source.bin!";
+        return false;
+    }
+    return true;
+}
+
+// REPLY: [status][payload][checksum]
+void replyError(int sock, const string &message)
+{
+    sendFramedMessage(sock, STATUS_ERROR, message);
+}
+bool replyFile(int sock, const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (f == nullptr)
+    {
+        replyError(sock, "Server could not read session.tdbg!");
+        return false;
+    }
+    bool sent = sendFramedFile(sock, STATUS_OK, f);
+    fclose(f);
+    return sent;
+}
+
+void handleClient(int sock)
+{
+    setSocketTimeouts(sock, SOCKET_TIMEOUT_SEC, SOCKET_TIMEOUT_SEC); // a dead client can not hang the server
+
+    string err = "";
+    if (!receiveUpload(sock, SOURCE_PATH, err))
+    {
+        cout << "[server] upload rejected: " << err << endl;
+        replyError(sock, err);
+    }
+    else if (!buildDebugFile(err))
+    {
+        cout << "[server] program rejected: " << err << endl;
+        replyError(sock, err);
+    }
+    else
+    {
+        cout << "[server] ok, sending " << TDBG_PATH << endl;
+        replyFile(sock, TDBG_PATH);
+    }
+    shutdown(sock, SHUT_WR); // the reply is finished, the load balancer reads until it sees the end
+    close(sock);
+}
+
+int createListenSocket(int port)
+{
+    // Create a TCP socket with SOCK_CLOEXEC, set SO_REUSEADDR so the server can be restarted right away,
+    // bind() to the port on any address, then listen(LISTEN_BACKLOG).
+    int sock = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (sock < 0)
+    {
+        perror("socket");
+        exit(1);
+    }
+    setCloseOnExec(sock);
+    int yes = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+    if (::bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        perror("bind");
+        exit(1);
+    }
+    if (listen(sock, LISTEN_BACKLOG) < 0)
+    {
+        perror("listen");
+        exit(1);
+    }
+    return sock;
+}
+
+void handler(int sg)
+{
+    (void)sg;
+    flag = 0;
+}
+// main section
+int32_t main(int argc, char *argv[])
+{
+    // the port is the first argument, for example: ./server 5001
+    int port = DEFAULT_SERVER_PORT;
+    if (argc > 1)
+    {
+        port = atoi(argv[1]);
+        if (port <= 0 || port > 65535)
+        {
+            cout << "usage: ./server <port>" << endl;
+            return 1;
+        }
     }
 
-    Timeline timeline;
-    executeProgram("resolve.bin", mainOffset, timeline);
+    signal(SIGINT, handler); // ctrl+c sets the flag, so the loop below ends
+    signal(SIGTERM, handler);
+    signal(SIGPIPE, SIG_IGN);
 
-    writeTdbg(timeline, "session.tdbg");
+    int listen_sock = createListenSocket(port);
+    cout << "[server] listening on port " << port << endl;
 
+    while (flag)
+    {
+        // poll() with a timeout, so the flag is looked at even when nobody connects
+        struct pollfd pfd;
+        pfd.fd = listen_sock;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        int ready = poll(&pfd, 1, 200);
+        if (ready <= 0)
+            continue;
+
+        int client_sock = acceptClient(listen_sock, nullptr, nullptr);
+        if (client_sock < 0)
+            continue;
+
+        handleClient(client_sock); // one client at a time, the load balancer sends them one by one
+    }
+
+    close(listen_sock);
     return 0;
 }
