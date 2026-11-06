@@ -20,4 +20,4 @@ Implemented all the functions, structs and constants in helper.h. helper.h is co
 Started server.cpp file. Updated phase 1's server.cpp and implemented the necessary functions for phase 2 (completed on 5/11).
 
 [6/11/2026]:
-started load_balancer.cpp.
+started load_balancer.cpp. finished the implementation of load_balancer.cpp.
