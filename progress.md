@@ -21,3 +21,6 @@ Started server.cpp file. Updated phase 1's server.cpp and implemented the necess
 
 [6/11/2026]:
 started load_balancer.cpp. finished the implementation of load_balancer.cpp.
+
+[8/11/2026]:
+started client.cpp. 
