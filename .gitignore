@@ -2,3 +2,6 @@ resolve.bin
 server
 session.tdbg
 source.bin
+client
+load_balancer
+prog.trace
