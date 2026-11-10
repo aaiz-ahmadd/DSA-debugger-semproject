@@ -5,3 +5,4 @@ source.bin
 client
 load_balancer
 prog.trace
+ttdb_last.tdbg*
